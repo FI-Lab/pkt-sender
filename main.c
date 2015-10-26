@@ -8,6 +8,8 @@
 #include <time.h>
 #include <sys/time.h>
 
+#include <rte_common.h>
+#include <rte_cycles.h>
 #include <rte_memory.h>
 #include <rte_mempool.h>
 #include <rte_eal.h>
@@ -106,6 +108,9 @@ const int nb_txd = 512;
 #define MBUF_CACHE_SIZE 128
 #define NB_BURST 32
 
+#define NB_TXQ 3
+#define NB_RXQ 3
+
 struct rte_eth_conf port_conf = 
 {
     .rxmode = 
@@ -120,24 +125,31 @@ static int all_port_setup(struct rte_mempool *mp)
     int ret;
     int nb_ports;
     int port_id;
+    int queue_id;
     nb_ports = rte_eth_dev_count();
 
     for(port_id = 0; port_id < nb_ports; port_id++)
     {
-        ret = rte_eth_dev_configure(port_id, 1, 1, &port_conf);
+        ret = rte_eth_dev_configure(port_id, NB_RXQ, NB_TXQ, &port_conf);
         if(ret < 0)
         {
             rte_exit(-1, "port %d configure failure!\n", port_id);
         }
-        ret = rte_eth_tx_queue_setup(port_id, 0, nb_txd, rte_eth_dev_socket_id(port_id), NULL);
-        if(ret != 0)
+        for(queue_id = 0; queue_id < NB_TXQ; queue_id++)
         {
-            rte_exit(-1, "port %d tx queue setup failure!\n", port_id);
+            ret = rte_eth_tx_queue_setup(port_id, queue_id, nb_txd, rte_eth_dev_socket_id(port_id), NULL);
+            if(ret != 0)
+            {
+                rte_exit(-1, "port %d tx queue setup failure!\n", port_id);
+            }
         }
-        ret = rte_eth_rx_queue_setup(port_id, 0, nb_rxd, rte_eth_dev_socket_id(port_id), NULL, mp);
-        if(ret != 0)
+        for(queue_id = 0; queue_id < NB_RXQ; queue_id++)
         {
-            rte_exit(-1, "port %d rx queue setup failure!\n", port_id);
+            ret = rte_eth_rx_queue_setup(port_id, queue_id, nb_rxd, rte_eth_dev_socket_id(port_id), NULL, mp);
+            if(ret != 0)
+            {
+                rte_exit(-1, "port %d rx queue setup failure!\n", port_id);
+            }
         }
         ret = rte_eth_dev_start(port_id);
         if(ret < 0)
@@ -154,52 +166,59 @@ static int all_port_setup(struct rte_mempool *mp)
 
 struct
 {
-    uint64_t tx_total_pkts;
-    uint64_t tx_last_total_pkts;
-    uint64_t tx_pps;
-    uint64_t tx_mbps;
+    struct
+    {
+        uint64_t tx_total_pkts;
+        uint64_t tx_last_total_pkts;
+    }txq_stats[NB_TXQ];
 
-    uint64_t rx_total_pkts;
-    uint64_t rx_last_total_pkts;
-    uint64_t rx_pps;
-    uint64_t rx_mbps;
+    struct
+    {
+        uint64_t rx_total_pkts;
+        uint64_t rx_last_total_pkts;
+    }rxq_stats[NB_RXQ];
 }port_stats[RTE_MAX_ETHPORTS];
 
 struct lcore_args
 {
     struct rte_mempool *mp;
     uint32_t port_id;
+    uint32_t queue_id;
 };
 
 static int sender_lcore_main(__attribute__((unused)) void *args)
 {
     struct rte_mempool *mp;
     struct rte_mbuf *m_table[NB_BURST];
-    struct rte_mbuf *rx_table[NB_BURST];
     struct lcore_args *largs;
-    int port_id;
+    uint32_t port_id;
+    uint32_t queue_id;
+
     largs = (struct lcore_args*)args;
     
     mp = largs->mp;
     port_id = largs->port_id;
+    queue_id = largs->queue_id;
     
     int i, count, ret;
-    printf("send packet from port %d!\n", port_id);
+    printf("send packet from port %u - queue %u!\n", port_id, queue_id);
 
-    port_stats[port_id].tx_total_pkts = 0;
-    port_stats[port_id].tx_last_total_pkts = 0;
+    port_stats[port_id].txq_stats[queue_id].tx_total_pkts = 0;
+    port_stats[port_id].txq_stats[queue_id].tx_last_total_pkts = 0;
 
-    port_stats[port_id].rx_total_pkts = 0;
-    port_stats[port_id].rx_last_total_pkts = 0;
+    port_stats[port_id].rxq_stats[queue_id].rx_total_pkts = 0;
+    port_stats[port_id].rxq_stats[queue_id].rx_last_total_pkts = 0;
+
 
     for(i = 0, count = 0;;)
     {
-        ret = rte_eth_rx_burst(port_id, 0, rx_table, NB_BURST);
-        port_stats[port_id].rx_total_pkts += ret;
-        while(ret > 0)
+      /*  ret = rte_eth_rx_burst(port_id, queue_id, m_table, NB_BURST);
+        port_stats[port_id].rxq_stats[queue_id].rx_total_pkts += ret;
+
+        while(ret)
         {
-            rte_pktmbuf_free(rx_table[--ret]);
-        }
+            rte_pktmbuf_free(m_table[--ret]);
+        }*/
 
         m_table[count++] = generate_mbuf(pms[i++], mp);
         if(i == global_data.total_trace)
@@ -208,10 +227,8 @@ static int sender_lcore_main(__attribute__((unused)) void *args)
         }
         if((count % NB_BURST) == 0)
         {
-            ret = rte_eth_tx_burst(port_id, 0, m_table, NB_BURST);
- 
-            port_stats[port_id].tx_total_pkts += ret;
-
+            ret = rte_eth_tx_burst(port_id, queue_id, m_table, NB_BURST);
+            port_stats[port_id].txq_stats[queue_id].tx_total_pkts += ret;
             while(ret < NB_BURST)
             {
                 rte_pktmbuf_free(m_table[ret++]);
@@ -223,27 +240,46 @@ static int sender_lcore_main(__attribute__((unused)) void *args)
 
 static void print_stats(int nb_ports)
 {
-    int i;
+    int i, j;
+    uint64_t tx_total;
+    uint64_t tx_last_total;
+    uint64_t rx_total;
+    uint64_t rx_last_total;
+    uint64_t pps;
+    uint64_t mbps;
     for(;;)
     {
         sleep(5);
         i = system("clear");
         for(i = 0; i < nb_ports; i++)
         {
-            port_stats[i].tx_pps = (port_stats[i].tx_total_pkts - port_stats[i].tx_last_total_pkts) / 5;
-            port_stats[i].tx_mbps = port_stats[i].tx_pps * 64 * 8 / 1000000;
-            port_stats[i].tx_last_total_pkts = port_stats[i].tx_total_pkts;
-            printf("Port %d Stats:\n", i);
-            printf(">>>>>>>>>>>>>>tx rate Pkt/s : %llu\n", (unsigned long long)port_stats[i].tx_pps);
-            printf(">>>>>>>>>>>>>>tx rate MBit/s : %llu\n", (unsigned long long)port_stats[i].tx_mbps);
-            printf(">>>>>>>>>>>>>>tx total : %llu\n", (unsigned long long)port_stats[i].tx_total_pkts);
+            tx_total = tx_last_total = 0;
+            for(j = 0; j < NB_TXQ; j++)
+            {
+                tx_total += port_stats[i].txq_stats[j].tx_total_pkts;
+                tx_last_total += port_stats[i].txq_stats[j].tx_last_total_pkts;
+                port_stats[i].txq_stats[j].tx_last_total_pkts = port_stats[i].txq_stats[j].tx_total_pkts;
+            }
+            for(j = 0; j < NB_RXQ; j++)
+            {
+                rx_total += port_stats[i].rxq_stats[j].rx_total_pkts;
+                rx_last_total += port_stats[i].rxq_stats[j].rx_last_total_pkts;
+                port_stats[i].rxq_stats[j].rx_last_total_pkts = port_stats[i].rxq_stats[j].rx_total_pkts;
+            }
+            pps = (tx_total - tx_last_total) / 5;
+            mbps = pps * 84 * 8 / 1000000;
+            printf("Port %d Statistics:\n", i);
+            printf(">>>>>>>>>>>tx rate: %llupps\n", (unsigned long long)pps);
+            printf(">>>>>>>>>>>tx rate: %lluMbps\n", (unsigned long long)mbps);
+            printf(">>>>>>>>>>tx total: %llu\n", (unsigned long long)tx_total);
+            printf("\n");
+            pps = (rx_total - rx_last_total) / 5;
+            mbps = pps * 84 * 8 / 1000000;
+            printf(">>>>>>>>>>>rx rate: %llupps\n", (unsigned long long)pps);
+            printf(">>>>>>>>>>>rx rate: %lluMbps\n", (unsigned long long)mbps);
+            printf(">>>>>>>>>>rx total: %llu\n", (unsigned long long)rx_total);
+            printf("============================\n");
 
-            port_stats[i].rx_pps = (port_stats[i].rx_total_pkts - port_stats[i].rx_last_total_pkts) / 5;
-            port_stats[i].rx_mbps = port_stats[i].rx_pps * 64 * 8 / 1000000;
-            port_stats[i].rx_last_total_pkts = port_stats[i].rx_total_pkts;
-            printf(">>>>>>>>>>>>>>rx rate Pkt/s : %llu\n", (unsigned long long)port_stats[i].rx_pps);
-            printf(">>>>>>>>>>>>>>rx rate MBit/s : %llu\n", (unsigned long long)port_stats[i].rx_mbps);
-            printf(">>>>>>>>>>>>>>rx total : %llu\n", (unsigned long long)port_stats[i].rx_total_pkts);
         }
     }
 }
@@ -274,11 +310,11 @@ int main(int argc, char **argv)
     int lcore_nb;
     lcore_nb = rte_lcore_count();
 
-    if(lcore_nb < nb_ports + 1)
+    if(lcore_nb < nb_ports * NB_TXQ + 1)
     {
         rte_exit(-1, "lcore is less than needed! (should be %d)\n", nb_ports + 1);
     }
-    if(lcore_nb > nb_ports + 1)
+    if(lcore_nb > nb_ports * NB_TXQ + 1)
     {
         rte_exit(-1, "lcore is too much! (should be %d)\n", nb_ports + 1);
     }
@@ -293,12 +329,14 @@ int main(int argc, char **argv)
 
     uint32_t lcore_id;
     uint32_t port_id;
-    port_id = 0;
+    uint32_t queue_id;
+    port_id = queue_id = 0;
     RTE_LCORE_FOREACH_SLAVE(lcore_id)
     {
         struct lcore_args largs;
         largs.mp = mbuf_pool;
-        largs.port_id = port_id++;
+        largs.queue_id = queue_id % NB_TXQ;
+        largs.port_id = queue_id++ / NB_TXQ;
         rte_eal_remote_launch(sender_lcore_main, (void*)&largs, lcore_id);
     }
     print_stats(nb_ports);
