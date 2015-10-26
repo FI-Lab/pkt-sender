@@ -190,6 +190,7 @@ static int sender_lcore_main(__attribute__((unused)) void *args)
 {
     struct rte_mempool *mp;
     struct rte_mbuf *m_table[NB_BURST];
+    struct rte_mbuf *rx_tlb[NB_BURST];
     struct lcore_args *largs;
     uint32_t port_id;
     uint32_t queue_id;
@@ -212,13 +213,13 @@ static int sender_lcore_main(__attribute__((unused)) void *args)
 
     for(i = 0, count = 0;;)
     {
-      /*  ret = rte_eth_rx_burst(port_id, queue_id, m_table, NB_BURST);
+        ret = rte_eth_rx_burst(port_id, queue_id, rx_tlb, NB_BURST);
         port_stats[port_id].rxq_stats[queue_id].rx_total_pkts += ret;
 
-        while(ret)
+        while(ret > 0)
         {
-            rte_pktmbuf_free(m_table[--ret]);
-        }*/
+            rte_pktmbuf_free(rx_tlb[--ret]);
+        }
 
         m_table[count++] = generate_mbuf(pms[i++], mp);
         if(i == global_data.total_trace)
@@ -245,8 +246,10 @@ static void print_stats(int nb_ports)
     uint64_t tx_last_total;
     uint64_t rx_total;
     uint64_t rx_last_total;
-    uint64_t pps;
-    uint64_t mbps;
+    uint64_t tx_pps;
+    uint64_t tx_mbps;
+    uint64_t rx_pps;
+    uint64_t rx_mbps;
     for(;;)
     {
         sleep(5);
@@ -254,6 +257,7 @@ static void print_stats(int nb_ports)
         for(i = 0; i < nb_ports; i++)
         {
             tx_total = tx_last_total = 0;
+            rx_total = rx_last_total = 0;
             for(j = 0; j < NB_TXQ; j++)
             {
                 tx_total += port_stats[i].txq_stats[j].tx_total_pkts;
@@ -266,17 +270,17 @@ static void print_stats(int nb_ports)
                 rx_last_total += port_stats[i].rxq_stats[j].rx_last_total_pkts;
                 port_stats[i].rxq_stats[j].rx_last_total_pkts = port_stats[i].rxq_stats[j].rx_total_pkts;
             }
-            pps = (tx_total - tx_last_total) / 5;
-            mbps = pps * 84 * 8 / 1000000;
+            tx_pps = (tx_total - tx_last_total) / 5;
+            tx_mbps = tx_pps * 84 * 8 / 1000000;
+            rx_pps = (rx_total - rx_last_total) / 5;
+            rx_mbps = rx_pps * 84 * 8 / 1000000;    
             printf("Port %d Statistics:\n", i);
-            printf(">>>>>>>>>>>tx rate: %llupps\n", (unsigned long long)pps);
-            printf(">>>>>>>>>>>tx rate: %lluMbps\n", (unsigned long long)mbps);
+            printf(">>>>>>>>>>>tx rate: %llupps\n", (unsigned long long)tx_pps);
+            printf(">>>>>>>>>>>tx rate: %lluMbps\n", (unsigned long long)tx_mbps);
             printf(">>>>>>>>>>tx total: %llu\n", (unsigned long long)tx_total);
             printf("\n");
-            pps = (rx_total - rx_last_total) / 5;
-            mbps = pps * 84 * 8 / 1000000;
-            printf(">>>>>>>>>>>rx rate: %llupps\n", (unsigned long long)pps);
-            printf(">>>>>>>>>>>rx rate: %lluMbps\n", (unsigned long long)mbps);
+            printf(">>>>>>>>>>>rx rate: %llupps\n", (unsigned long long)rx_pps);
+            printf(">>>>>>>>>>>rx rate: %lluMbps\n", (unsigned long long)rx_mbps);
             printf(">>>>>>>>>>rx total: %llu\n", (unsigned long long)rx_total);
             printf("============================\n");
 
