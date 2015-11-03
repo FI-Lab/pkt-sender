@@ -1,4 +1,4 @@
-dep_main.o = /home/yangfr/pkt-sender/main.c /usr/include/stdc-predef.h \
+dep_main.o = /home/yangfr/pkt-sender2/main.c /usr/include/stdc-predef.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_config.h \
  /usr/include/stdio.h /usr/include/features.h \
  /usr/include/x86_64-linux-gnu/sys/cdefs.h \
@@ -87,6 +87,7 @@ dep_main.o = /home/yangfr/pkt-sender/main.c /usr/include/stdc-predef.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_eal.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_launch.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_ring.h \
+ /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_timer.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_ethdev.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_interrupts.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/exec-env/rte_interrupts.h \
@@ -117,4 +118,4 @@ dep_main.o = /home/yangfr/pkt-sender/main.c /usr/include/stdc-predef.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_ip.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_udp.h \
  /home/yangfr/dpdk-2.1.0-rc3//x86_64-native-linuxapp-gcc/include/rte_tcp.h \
- /home/yangfr/pkt-sender/pm.h /home/yangfr/pkt-sender/tload.h
+ /home/yangfr/pkt-sender2/pm.h /home/yangfr/pkt-sender2/tload.h
