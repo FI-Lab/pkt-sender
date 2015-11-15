@@ -3,9 +3,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <rte_memory.h>
 #include <netinet/in.h>
 #include "pm.h"
+
+uint32_t pkt_length = 64;
 
 #if 0
 static void debug_pm(struct packet_model pm)
@@ -77,50 +80,69 @@ int load_trace_line(FILE *fp, struct packet_model *pm)
         return INVALID_LINE;
     }
     
-    //ether header
-    memset(&(pm->eth.d_addr), 0, sizeof(pm->eth.d_addr));
-    memset(&(pm->eth.s_addr), 0, sizeof(pm->eth.s_addr));
-    pm->eth.d_addr.addr_bytes[5] = (uint8_t)0x02;
-    pm->eth.s_addr.addr_bytes[5] = (uint8_t)0x01;
-    pm->eth.ether_type = htons((uint16_t)0x0800);
-
-    //ipv4 header
-    pm->ip.next_proto_id = proto;
-    pm->ip.version_ihl = (uint8_t)0x45;
-    pm->ip.type_of_service = (uint8_t)0;
-    pm->ip.total_length = htons((uint16_t)46);
-    pm->ip.packet_id = 0;
-    pm->ip.fragment_offset = 0x0040;//DF
-    pm->ip.time_to_live = 0xff;
-    pm->ip.hdr_checksum = 0;
-    pm->ip.src_addr = htonl(strtoul(tok[0], NULL, 0));
-    pm->ip.dst_addr = htonl(strtoul(tok[1], NULL, 0));
-    pm->ip.hdr_checksum = rte_ipv4_cksum(&(pm->ip));
-
-    //l4 header
     if(proto == 6)
     {
-        pm->l4.tcp.hdr.src_port = htons((uint16_t)strtoul(tok[2], NULL, 0));
-        pm->l4.tcp.hdr.dst_port = htons((uint16_t)strtoul(tok[3], NULL, 0));
-        pm->l4.tcp.hdr.sent_seq = htonl(1);
-        pm->l4.tcp.hdr.recv_ack = htonl(2);
-        pm->l4.tcp.hdr.data_off = (uint8_t)(sizeof(struct tcp_hdr)>>2)<<4;
-        pm->l4.tcp.hdr.tcp_flags = (uint8_t)0x10;
-        pm->l4.tcp.hdr.rx_win = htons(0xffff);
-        pm->l4.tcp.hdr.cksum = 0;
-        pm->l4.tcp.hdr.tcp_urp = 0;
-        pm->l4.tcp.hdr.cksum = rte_ipv4_udptcp_cksum(&(pm->ip), (void*)&(pm->l4.tcp));
-        memset(pm->l4.tcp.payload, 0, 6);
+        //ether header
+        memset(&(pm->tcp.eth.d_addr), 0, sizeof(pm->tcp.eth.d_addr));
+        memset(&(pm->tcp.eth.s_addr), 0, sizeof(pm->tcp.eth.s_addr));
+        pm->tcp.eth.d_addr.addr_bytes[5] = (uint8_t)0x02;
+        pm->tcp.eth.s_addr.addr_bytes[5] = (uint8_t)0x01;
+        pm->tcp.eth.ether_type = htons((uint16_t)0x0800);
+
+        //ipv4 header
+        pm->tcp.ip.next_proto_id = proto;
+        pm->tcp.ip.version_ihl = (uint8_t)0x45;
+        pm->tcp.ip.type_of_service = (uint8_t)0;
+        pm->tcp.ip.total_length = htons((uint16_t)(pkt_length - 18));
+        pm->tcp.ip.packet_id = 0;
+        pm->tcp.ip.fragment_offset = 0x0040;//DF
+        pm->tcp.ip.time_to_live = 0xff;
+        pm->tcp.ip.hdr_checksum = 0;
+        pm->tcp.ip.src_addr = htonl(strtoul(tok[0], NULL, 0));
+        pm->tcp.ip.dst_addr = htonl(strtoul(tok[1], NULL, 0));
+        pm->tcp.ip.hdr_checksum = rte_ipv4_cksum(&(pm->tcp.ip));
+
+        //l4 header
+        pm->tcp.tcp.src_port = htons((uint16_t)strtoul(tok[2], NULL, 0));
+        pm->tcp.tcp.dst_port = htons((uint16_t)strtoul(tok[3], NULL, 0));
+        pm->tcp.tcp.sent_seq = htonl(1);
+        pm->tcp.tcp.recv_ack = htonl(2);
+        pm->tcp.tcp.data_off = (uint8_t)(sizeof(struct tcp_hdr)>>2)<<4;
+        pm->tcp.tcp.tcp_flags = (uint8_t)0x10;
+        pm->tcp.tcp.rx_win = htons(0xffff);
+        pm->tcp.tcp.cksum = 0;
+        pm->tcp.tcp.tcp_urp = 0;
+        pm->tcp.tcp.cksum = rte_ipv4_udptcp_cksum(&(pm->tcp.ip), (void*)&(pm->tcp.tcp));
         pm->is_udp = 0;
     }
     else
     {
-        pm->l4.udp.hdr.src_port = htons((uint16_t)strtoul(tok[2], NULL, 0));
-        pm->l4.udp.hdr.dst_port = htons((uint16_t)strtoul(tok[3], NULL, 0));
-        pm->l4.udp.hdr.dgram_len = htons(26);
-        pm->l4.udp.hdr.dgram_cksum = 0;
-        pm->l4.udp.hdr.dgram_cksum = rte_ipv4_udptcp_cksum(&(pm->ip), (void*)&(pm->l4.udp));
-        memset(pm->l4.udp.payload, 0, 18);
+        //ether header
+        memset(&(pm->udp.eth.d_addr), 0, sizeof(pm->udp.eth.d_addr));
+        memset(&(pm->udp.eth.s_addr), 0, sizeof(pm->udp.eth.s_addr));
+        pm->udp.eth.d_addr.addr_bytes[5] = (uint8_t)0x02;
+        pm->udp.eth.s_addr.addr_bytes[5] = (uint8_t)0x01;
+        pm->udp.eth.ether_type = htons((uint16_t)0x0800);
+
+        //ipv4 header
+        pm->udp.ip.next_proto_id = proto;
+        pm->udp.ip.version_ihl = (uint8_t)0x45;
+        pm->udp.ip.type_of_service = (uint8_t)0;
+        pm->udp.ip.total_length = htons((uint16_t)(pkt_length - 18));
+        pm->udp.ip.packet_id = 0;
+        pm->udp.ip.fragment_offset = 0x0040;//DF
+        pm->udp.ip.time_to_live = 0xff;
+        pm->udp.ip.hdr_checksum = 0;
+        pm->udp.ip.src_addr = htonl(strtoul(tok[0], NULL, 0));
+        pm->udp.ip.dst_addr = htonl(strtoul(tok[1], NULL, 0));
+        pm->udp.ip.hdr_checksum = rte_ipv4_cksum(&(pm->udp.ip));
+
+
+        pm->udp.udp.src_port = htons((uint16_t)strtoul(tok[2], NULL, 0));
+        pm->udp.udp.dst_port = htons((uint16_t)strtoul(tok[3], NULL, 0));
+        pm->udp.udp.dgram_len = htons((uint16_t)(pkt_length - 18 - sizeof(struct ipv4_hdr)));
+        pm->udp.udp.dgram_cksum = 0;
+        pm->udp.udp.dgram_cksum = rte_ipv4_udptcp_cksum(&(pm->udp.ip), (void*)&(pm->udp.udp));
         pm->is_udp = 1;
     }
     return VALID_LINE;

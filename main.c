@@ -28,6 +28,24 @@
 #include "pm.h"
 #include "tload.h"
 
+
+const int nb_rxd = 128;
+const int nb_txd = 512;
+
+#define NB_MBUF 65535
+#define MBUF_CACHE_SIZE 128
+#define NB_BURST 32
+
+#define NB_TXQ 3
+#define NB_RXQ 1
+
+#define NB_MAX_PM 1000001
+
+#define TX_10Gbps 10000
+#define TX_RATE_DFT TX_10Gbps
+
+#define PRINT_GAP 2
+
 /* global data */
 struct 
 {
@@ -35,11 +53,10 @@ struct
 }global_data;
 
 /* generate mbuf */
-#define NB_MAX_PM 1000001
 struct packet_model pms[NB_MAX_PM];
 
-
-#define PKT_LENGTH 64
+/* pkt length*/
+extern uint32_t pkt_length;
 
 static inline struct rte_mbuf* generate_mbuf(struct packet_model pm, struct rte_mempool *mp)
 {
@@ -51,23 +68,19 @@ static inline struct rte_mbuf* generate_mbuf(struct packet_model pm, struct rte_
         rte_exit(-1, "mempool is empty!\n");
     }
     char *data;
-    data = rte_pktmbuf_append(m, sizeof(struct ether_hdr));
-    rte_memcpy(data, &(pm.eth), sizeof(struct ether_hdr));
-    data = rte_pktmbuf_append(m, sizeof(struct ipv4_hdr));
-    rte_memcpy(data, &(pm.ip), sizeof(struct ipv4_hdr));
-    if(pm.is_udp)
+   if(pm.is_udp)
     {
-        data = rte_pktmbuf_append(m, sizeof(struct udp_hdr));
-        rte_memcpy(data, &(pm.l4.udp.hdr), sizeof(struct udp_hdr));
-        data = rte_pktmbuf_append(m, PKT_LENGTH - 46);
-        rte_memcpy(data, pm.l4.udp.payload, PKT_LENGTH - 46);
+        //printf("%d \n", ntohs(pm.udp.ip.total_length));
+        data = rte_pktmbuf_append(m, sizeof(pm.udp));
+        rte_memcpy(data, &(pm.udp), sizeof(pm.udp));
+        data = rte_pktmbuf_append(m, pkt_length - 46);
     }
     else
     {
-        data = rte_pktmbuf_append(m, sizeof(struct tcp_hdr));
-        rte_memcpy(data, &(pm.l4.tcp.hdr), sizeof(struct tcp_hdr));
-        data = rte_pktmbuf_append(m, PKT_LENGTH - 58);
-        rte_memcpy(data, pm.l4.tcp.payload, PKT_LENGTH - 58);
+        //printf("%d \n", ntohs(pm.tcp.ip.total_length));
+        data = rte_pktmbuf_append(m, sizeof(pm.tcp));
+        rte_memcpy(data, &(pm.tcp), sizeof(pm.tcp));
+        data = rte_pktmbuf_append(m, pkt_length - 58);
     }
     return m;
 }
@@ -77,11 +90,14 @@ struct
 {
     char trace_file[256];
     uint64_t Mbps;
-}params;
+}params = 
+{
+    .Mbps = TX_RATE_DFT,
+};
 
 static void usage()
 {
-    printf("Usage: pkt-sender <EAL options> -- -t <trace_file>\n");
+    printf("Usage: pkt-sender <EAL options> -- -t <trace_file> -s <Mbps> -L <pkt_length>\n");
     rte_exit(-1, "invalid arguments!\n");
 }
 
@@ -89,12 +105,19 @@ static void parse_params(int argc, char **argv)
 {
     char opt;
     int accept = 0;
-    while((opt = getopt(argc, argv, "t:s:")) != -1)
+    while((opt = getopt(argc, argv, "t:s:L:")) != -1)
     {
         switch(opt)
         {
             case 't': rte_memcpy(params.trace_file, optarg, strlen(optarg)+1); accept = 1; break;
             case 's': params.Mbps = atoi(optarg); break;
+            case 'L': 
+                      pkt_length = atoi(optarg);
+                      if(pkt_length < 64)
+                      {
+                          rte_exit(EINVAL, "pkt_length should be no less than 64!\n");
+                      }
+                      break;
             default: usage();
         }
     }
@@ -111,17 +134,6 @@ static void parse_params(int argc, char **argv)
 /**************************************************************/
 
 /* port init */
-
-const int nb_rxd = 128;
-const int nb_txd = 512;
-
-#define NB_MBUF 8191
-#define MBUF_CACHE_SIZE 128
-#define NB_BURST 32
-
-#define NB_TXQ 3
-#define NB_RXQ 1
-
 struct rte_eth_conf port_conf = 
 {
     .rxmode = 
@@ -212,6 +224,7 @@ struct lcore_args
         uint8_t is_rx_lcore;
     }rx;
     uint64_t speed;
+    uint32_t trace_idx;
 };
 
 struct lcore_args lc_args[RTE_MAX_LCORE];
@@ -223,7 +236,6 @@ static void send_pkt_rate(__rte_unused struct rte_timer *timer, void *arg)
     uint32_t port_id;
     uint32_t queue_id;
     uint32_t count = 0;
-    uint32_t i = 0;
     int ret;
 
     mp = largs->tx.mp;
@@ -231,10 +243,12 @@ static void send_pkt_rate(__rte_unused struct rte_timer *timer, void *arg)
     queue_id = largs->tx.queue_id;
 
     for(;count < NB_BURST;)
-        largs->tx.m_table[count++] = generate_mbuf(pms[i++], mp);
-
-    if(i == global_data.total_trace) {
-        i = 0;
+    {
+        if(largs->trace_idx == global_data.total_trace) 
+        {
+            largs->trace_idx = 0;
+        }
+        largs->tx.m_table[count++] = generate_mbuf(pms[largs->trace_idx++], mp);
     }
 
     ret = rte_eth_tx_burst(port_id, queue_id, largs->tx.m_table, NB_BURST);
@@ -243,13 +257,11 @@ static void send_pkt_rate(__rte_unused struct rte_timer *timer, void *arg)
     {
         rte_pktmbuf_free(largs->tx.m_table[ret++]);
     }
-    count = 0;
-
 }
 
 static uint64_t calc_period(uint64_t speed)
 {
-    return (uint64_t) (((NB_BURST * (PKT_LENGTH + 20) * 8 * rte_get_tsc_hz()) / (double) speed) );
+    return (uint64_t) (((NB_BURST * (pkt_length + 20) * 8 * rte_get_tsc_hz()) / (double) speed) );
 }
 
 static int sender_lcore_main(void *args)
@@ -294,7 +306,6 @@ static int sender_lcore_main(void *args)
                 }
             }
         }
-
         rte_timer_manage();
     }
 }
@@ -311,7 +322,7 @@ static void print_stats(int nb_ports)
     last_cyc = rte_get_tsc_cycles();
     for(;;)
     {
-        sleep(5);
+        sleep(PRINT_GAP);
         i = system("clear");
         for(i = 0; i < nb_ports; i++)
         {
@@ -333,10 +344,10 @@ static void print_stats(int nb_ports)
             time_diff = (cur_cyc - last_cyc) / (double)rte_get_tsc_hz();
             port_stats[i].tx_total = tx_total;
             port_stats[i].tx_pps = (uint64_t)((tx_total - tx_last_total) / time_diff);
-            port_stats[i].tx_mbps = port_stats[i].tx_pps * (PKT_LENGTH + 20) * 8 / (1ULL<< 20);
+            port_stats[i].tx_mbps = port_stats[i].tx_pps * (pkt_length + 20) * 8 / (1000000);
             port_stats[i].rx_total = rx_total;
             port_stats[i].rx_pps = (uint64_t)((rx_total - rx_last_total) / time_diff);
-            port_stats[i].rx_mbps = port_stats[i].rx_pps * (PKT_LENGTH + 20) * 8 / (1ULL << 20);
+            port_stats[i].rx_mbps = port_stats[i].rx_pps * (pkt_length + 20) * 8 / (1000000);
             
         }
         last_cyc = rte_get_tsc_cycles();
@@ -413,6 +424,7 @@ int main(int argc, char **argv)
         lc_args[lcore_id].rx.is_rx_lcore = lc_args[lcore_id].tx.queue_id == 0? 1: 0; 
         lc_args[lcore_id].port_id = queue_id++ / NB_TXQ;
         lc_args[lcore_id].speed = params.Mbps * 1024 * 1024 / NB_TXQ;
+        lc_args[lcore_id].trace_idx = 0;
         rte_eal_remote_launch(sender_lcore_main, (void*)&lc_args[lcore_id], lcore_id);
     }
     print_stats(nb_ports);
