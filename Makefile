@@ -42,7 +42,7 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP = pkt-sender
 
 # all source are stored in SRCS-y
-SRCS-y := main.c tload.c
+SRCS-y := main.c tload.c tx_mp.c
 
 CFLAGS += -O3 -g
 #CFLAGS += $(WERROR_FLAGS)
