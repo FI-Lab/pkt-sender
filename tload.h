@@ -13,4 +13,9 @@
 int load_trace_line(FILE *fp, struct packet_model *pm);
 int load_trace(const char *file, struct packet_model pms[]);
 
+
+int load_vxlan_trace_line(FILE *fp, struct packet_model *pm);
+int load_vxlan_trace(const char *file, struct packet_model pms[]);
+
+
 #endif

@@ -168,3 +168,63 @@ int load_trace(const char *file, struct packet_model pms[])
     return count;
 }
 
+
+int load_vxlan_trace_line(FILE *fp, struct packet_model *pm)
+{
+    uint32_t vni;
+    if(fscanf(fp, "%u%*c", &vni) == EOF)
+    {
+        return END_LINE;    
+    }
+    memset(pm, 0, sizeof(*pm));
+    pm->vxlan.vx.vx_flags = htonl(0x08000000ULL);
+    pm->vxlan.vx.vx_vni = htonl(vni << 8);
+    //add udp hdr
+    struct udp_hdr *vx_udp_hdr = (struct udp_hdr*)(&(pm->vxlan.udp));
+    vx_udp_hdr->dst_port = htons(4789);
+    vx_udp_hdr->src_port = htons(9999);
+    vx_udp_hdr->dgram_len = htons(sizeof(struct vxlan_hdr) + sizeof(struct udp_hdr) + pkt_length - 4);
+    //add ip hdr
+    struct ipv4_hdr *vx_ip_hdr = (struct ipv4_hdr*)(&(pm->vxlan.ip));
+    vx_ip_hdr->version_ihl = 0x45;
+    vx_ip_hdr->total_length = htons(ntohs(vx_udp_hdr->dgram_len) + sizeof(struct ipv4_hdr));
+    vx_ip_hdr->fragment_offset = htons(0x4000);
+    vx_ip_hdr->next_proto_id = 17;
+    vx_ip_hdr->hdr_checksum = rte_ipv4_cksum(vx_ip_hdr);
+
+    vx_udp_hdr->dgram_cksum = rte_ipv4_udptcp_cksum(vx_ip_hdr, (void*)vx_udp_hdr);
+    //add ether hdr
+    //
+    struct vlan_hdr *vl_hdr;
+    vl_hdr = (struct vlan_hdr*)(&(pm->vxlan.vlan));
+    vl_hdr->vlan_tci = 0;
+    vl_hdr->eth_proto = htons(0x0800);
+
+    struct ether_hdr *vx_eth_hdr = (struct ether_hdr*)(&(pm->vxlan.eth));
+    vx_eth_hdr->ether_type = htons(0x8100);
+
+    pm->is_vxlan = 1;
+    return load_trace_line(fp, pm);
+}
+
+int load_vxlan_trace(const char *file, struct packet_model pms[])
+{
+    FILE *fp = fopen(file, "rb");
+    int ret = 0;
+    int count = 0;
+    if(fp == NULL)
+    {
+        rte_exit(-1, "open trace file failure!\n");
+    }
+    while((ret = load_vxlan_trace_line(fp, &pms[count])) != END_LINE)
+    {
+        if(ret == VALID_LINE)
+        {
+            count++;
+        }
+    }
+    printf("total trace %d\n", count);
+    return count;
+
+}
+

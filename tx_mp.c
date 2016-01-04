@@ -18,6 +18,15 @@ inline struct rte_mbuf* generate_mbuf(struct packet_model pm, struct rte_mempool
         rte_exit(-1, "mempool is empty!\n");
     }
     char *data;
+    if(pm.is_vxlan)
+    {
+        data = rte_pktmbuf_append(m, sizeof(pm.vxlan));
+        if(data == NULL)
+        {
+            rte_exit(-1, "mbuf append vxlan hdr failed!\n");
+        }
+        rte_memcpy(data, (char*)&(pm.vxlan), sizeof(pm.vxlan));
+    }
     if(pm.is_udp)
     {
         data = rte_pktmbuf_append(m, sizeof(pm.udp));

@@ -29,6 +29,9 @@
 #include "tload.h"
 #include "tx_mp.h"
 
+
+#define GEN_VXLAN
+
 #define NB_MBUF 65535
 #define MBUF_CACHE_SIZE 512
 #define NB_BURST 32
@@ -291,6 +294,12 @@ static void print_stats(int nb_ports)
     uint64_t rx_total;
     uint64_t rx_last_total;
     uint64_t last_cyc, cur_cyc;
+    uint64_t frame_len;
+#ifdef GEN_VXLAN
+    frame_len = pkt_length + 20 + 14 + 20 + 8 + 8;
+#else
+    frame_len = pkt_length + 20;
+#endif
     double time_diff;
     last_cyc = rte_get_tsc_cycles();
     for(;;)
@@ -317,10 +326,10 @@ static void print_stats(int nb_ports)
             time_diff = (cur_cyc - last_cyc) / (double)rte_get_tsc_hz();
             port_stats[i].tx_total = tx_total;
             port_stats[i].tx_pps = (uint64_t)((tx_total - tx_last_total) / time_diff);
-            port_stats[i].tx_mbps = port_stats[i].tx_pps * (pkt_length + 20) * 8 / (1000000);
+            port_stats[i].tx_mbps = port_stats[i].tx_pps * (frame_len) * 8 / (1000000);
             port_stats[i].rx_total = rx_total;
             port_stats[i].rx_pps = (uint64_t)((rx_total - rx_last_total) / time_diff);
-            port_stats[i].rx_mbps = port_stats[i].rx_pps * (pkt_length + 20) * 8 / (1000000);
+            port_stats[i].rx_mbps = port_stats[i].rx_pps * (frame_len) * 8 / (1000000);
             
         }
         last_cyc = rte_get_tsc_cycles();
@@ -379,7 +388,11 @@ int main(int argc, char **argv)
 
     rte_timer_subsystem_init();
 
+#ifndef GEN_VXLAN
     ret = load_trace(ginfo.trace_file, pms);   
+#else
+    ret = load_vxlan_trace(ginfo.trace_file, pms);
+#endif
     ginfo.total_trace = ret;
     if(ret <= 0)
     {
